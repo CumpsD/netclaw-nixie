@@ -71,6 +71,7 @@ they are not host prerequisites.
 3. **Up**, starts the stack.
 4. **Health**, waits for netclaw to report healthy.
 5. **`netclaw init`**, runs netclaw's first-run wizard.
+6. **Seed**, registers the MCP servers, approvals and identity.
 
 Step 5 is not optional. Until it runs, netclaw has no model *and* falls back to
 a Public security posture with `shell_execute` disabled, which makes every tool
@@ -145,6 +146,16 @@ Two kinds of tracked file, with different lifecycles.
 | `netclaw/config/tool-approvals.json` | `config-init/approvals-seed.json` |
 | `netclaw/identity/AGENTS.md` | `config-init/agents-block.md` |
 | `netclaw/identity/SOUL.md` | netclaw's default, renamed to `AGENT_NAME` |
+
+Seeding waits for `netclaw init` and only happens once afterwards. Writing
+`netclaw.json` any earlier makes the wizard report *"Existing Netclaw install
+detected"* and offer a repair menu instead of the first-run flow, because simply
+registering an MCP server creates that file. If you bring the stack up with a
+bare `docker compose up -d` instead of `setup.sh`, run `netclaw init` and then
+`docker compose up -d` once more to pick the seeding up.
+
+If you choose an agent name during `netclaw init`, that name wins over
+`AGENT_NAME` — a deliberate answer beats a default.
 
 After that first run `config-init` never touches them again. Manage them with
 the netclaw CLI (`netclaw mcp`, `netclaw model`, `netclaw config`) or by hand,

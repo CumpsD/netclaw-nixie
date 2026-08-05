@@ -28,7 +28,7 @@ warn()  { printf '  %s!%s %s\n' "$YEL" "$R" "$1"; }
 fail()  { printf '  %s✗%s %s\n' "$RED" "$R" "$1"; }
 info()  { printf '    %s%s%s\n' "$DIM" "$1" "$R"; }
 die()   { printf '\n%s✗ %s%s\n\n' "$RED" "$1" "$R" >&2; exit 1; }
-TOTAL=5
+TOTAL=6
 
 # Quoted heredoc: the art is full of backslashes, and unquoted they would be
 # eaten as escapes.
@@ -222,10 +222,36 @@ else
         printf '\n%s  Starting the wizard — it asks for a provider, an API key and a model.%s\n\n' "$DIM" "$R"
         docker compose exec -it netclaw netclaw init
         doctor="$(docker compose exec -T netclaw netclaw doctor 2>&1 || true)"
+        RAN_INIT=1
     else
         warn "not an interactive terminal — run this yourself:"
         printf '\n      docker compose exec -it netclaw netclaw init\n'
+        info "then re-run ./setup.sh to register the MCP servers and approvals"
     fi
+fi
+
+# ---- 6. seed MCP servers, approvals and identity ---------------------------
+# config-init deliberately defers these until netclaw has been initialised:
+# creating netclaw.json earlier makes `netclaw init` report an existing install
+# and offer a repair menu instead of the first-run flow. Now that the wizard has
+# run, replay config-init so the seeding it skipped actually happens.
+#
+# --no-deps because tools-init has already completed; without it compose would
+# re-evaluate that dependency for a one-off run.
+if [ "${RAN_INIT:-0}" = "1" ]; then
+    step "Seeding MCP servers, approvals and identity"
+    docker compose run --rm --no-deps config-init 2>&1 \
+        | grep -E '\[config-init\]' | sed 's/^/  /' || true
+    # The daemon reads MCP servers at startup, so it needs a nudge to connect
+    # to the ones just registered.
+    docker compose restart netclaw >/dev/null 2>&1 || true
+    deadline=$((SECONDS + 120))
+    while [ "$(docker inspect -f '{{.State.Health.Status}}' netclaw 2>/dev/null)" != healthy ]; do
+        [ $SECONDS -lt $deadline ] || break
+        sleep 3
+    done
+    doctor="$(docker compose exec -T netclaw netclaw doctor 2>&1 || true)"
+    ok "seeded"
 fi
 
 # ---- summary ---------------------------------------------------------------

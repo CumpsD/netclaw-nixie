@@ -175,12 +175,32 @@ fi
 # that were revoked. The seed is a starting point, not a desired state.
 #
 # Delete the marker file to deliberately re-seed.
+#
+# Seeding also waits for `netclaw init`. Writing config/netclaw.json before the
+# wizard has run makes it report "Existing Netclaw install detected" and offer a
+# repair menu instead of the first-run flow — because merely registering an MCP
+# server creates the file. So nothing here touches netclaw config until the
+# wizard has left its own marks on it: a Security section and a main model.
+#
+# setup.sh re-runs this service straight after the wizard, so the wait is
+# invisible there; a bare `docker compose up -d` picks it up on the next start.
 # ===========================================================================
 SEED_MARKER="$NETCLAW_HOME/.nixie-seeded"
+NCJSON="$NETCLAW_HOME/config/netclaw.json"
+
+netclaw_initialised() {
+    [ -f "$NCJSON" ] || return 1
+    jq -e '.Security and (.Models.Roles.Main // empty)' "$NCJSON" >/dev/null 2>&1
+}
+
 if [ -f "$SEED_MARKER" ]; then
     log "already seeded on $(cat "$SEED_MARKER" 2>/dev/null || echo 'an earlier run') — leaving config and identity alone"
+elif ! netclaw_initialised; then
+    log "netclaw is not configured yet — deferring config and identity seeding"
+    log "  run: docker compose exec -it netclaw netclaw init"
+    log "  (setup.sh does this for you, then re-runs this step)"
 else
-    log "first run — seeding netclaw config and identity"
+    log "first run after netclaw init — seeding config and identity"
 
 # ---------------------------------------------------------------------------
 # 3. MCP servers.
@@ -209,18 +229,30 @@ add_mcp qmd       --transport stdio qmd -- qmd mcp
 add_mcp atlassian --transport http atlassian https://mcp.atlassian.com/v1/mcp
 
 # ---------------------------------------------------------------------------
-# 4. Agent identity rename.
+# 4. Agent identity name.
+#
+# Only applied when the wizard left the name unset or at netclaw's default.
+# `netclaw init` asks for an agent name, and a name chosen there is a more
+# deliberate answer than AGENT_NAME's default in .env — so it wins.
 # ---------------------------------------------------------------------------
-NCJSON="$NETCLAW_HOME/config/netclaw.json"
-if [ -n "${AGENT_NAME:-}" ] && [ ! -f "$NCJSON" ]; then
-    warn "no config/netclaw.json — skipping agent rename (netclawd will generate one on first run)"
-elif [ -n "${AGENT_NAME:-}" ]; then
+# EFFECTIVE_NAME is what the deployment actually calls itself, which SOUL.md
+# below follows. It is AGENT_NAME only when the wizard did not set a name of
+# its own — otherwise netclaw.json and SOUL.md would disagree.
+EFFECTIVE_NAME="${AGENT_NAME:-}"
+if [ -n "${AGENT_NAME:-}" ] && [ -f "$NCJSON" ]; then
     current="$(jq -r '.Identity.AgentName // ""' "$NCJSON")"
-    if [ "$current" != "$AGENT_NAME" ]; then
-        log "renaming agent: '${current}' -> '${AGENT_NAME}'"
-        jq --arg n "$AGENT_NAME" '.Identity.AgentName = $n' "$NCJSON" > /tmp/nc.json \
-            && cat /tmp/nc.json > "$NCJSON" && rm -f /tmp/nc.json
-    fi
+    case "$current" in
+        ""|Netclaw)
+            log "setting agent name: '${current:-unset}' -> '${AGENT_NAME}'"
+            jq --arg n "$AGENT_NAME" '.Identity.AgentName = $n' "$NCJSON" > /tmp/nc.json \
+                && cat /tmp/nc.json > "$NCJSON" && rm -f /tmp/nc.json
+            ;;
+        "$AGENT_NAME") ;;
+        *)
+            log "agent name '${current}' set during netclaw init — keeping it"
+            EFFECTIVE_NAME="$current"
+            ;;
+    esac
 fi
 
 # SOUL.md is handled separately from the netclaw.json rename above.
@@ -232,12 +264,12 @@ fi
 # needing a change. The seed marker is only written once SOUL.md has actually
 # been rewritten, so seeding stays pending until the daemon has produced it.
 SOUL="$NETCLAW_HOME/identity/SOUL.md"
-if [ -n "${AGENT_NAME:-}" ] && [ -f "$SOUL" ]; then
+if [ -n "${EFFECTIVE_NAME:-}" ] && [ -f "$SOUL" ]; then
     soul_name="$(sed -n 's/^# You are \(.*\)$/\1/p' "$SOUL" | head -1)"
-    if [ -n "$soul_name" ] && [ "$soul_name" != "$AGENT_NAME" ]; then
-        sed -i "1,10s/^# You are ${soul_name}$/# You are ${AGENT_NAME}/" "$SOUL"
+    if [ -n "$soul_name" ] && [ "$soul_name" != "$EFFECTIVE_NAME" ]; then
+        sed -i "1,10s/^# You are ${soul_name}$/# You are ${EFFECTIVE_NAME}/" "$SOUL"
         chown "$UID_GID" "$SOUL"
-        log "SOUL.md: '${soul_name}' -> '${AGENT_NAME}'"
+        log "SOUL.md: '${soul_name}' -> '${EFFECTIVE_NAME}'"
     fi
 fi
 
