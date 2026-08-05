@@ -1,0 +1,198 @@
+# Nixie — netclaw agent deployment.
+#
+# Secrets and per-deployment identity live in .env (gitignored):
+#   GH_TOKEN, GIT_USER_NAME, GIT_USER_EMAIL, GIT_USER_KEY, AGENT_NAME
+# Copy .env.example to .env to get started. COMPOSE_FILE=nixie.yml is set there
+# too, so plain `docker compose up -d` works without -f.
+#
+# The dev toolset (dotnet, node, rg, kubectl, ...) is provisioned into the
+# `tools` volume by tools-init and mounted read-only at /tools. The netclaw
+# image already carries /tools/bin on its PATH and its entrypoint has an
+# `ensure_tools_accessible /tools` step built for exactly this, so no PATH
+# override is needed here — never set PATH in this file, it would replace the
+# image's value wholesale.
+
+volumes:
+  tools:
+  redis-data:
+
+services:
+  # ---- init: build + provision the /tools volume, then exit ----------------
+  tools-init:
+    build:
+      context: ./tools-init
+      args:
+        # All pinned to the latest release as of 2026-08-05, verified fetchable.
+        # DOTNET_EXTRA_* are opt-in *lists*, not versions — empty means "install
+        # none", so they stay empty unless a client repo needs a second SDK.
+        BRUNO_VERSION: "4.0.0"
+        CSHARP_LS_VERSION: "0.26.0"
+        DOTNET_EF_VERSION: "10.0.10"
+        DOTNET_EXTRA_RUNTIMES: ""
+        DOTNET_EXTRA_SDKS: ""            # space-separated, e.g. "8.0.405"
+        DOTNET_OUTDATED_TOOL_VERSION: "4.8.1"
+        DOTNET_SCRIPT_VERSION: "2.0.1"
+        DOTNET_VERSION: "10.0.302"
+        GH_VERSION: "2.97.0"             # netclaw's apt gh is 2.45.0; ours wins on PATH
+        GITHUB_MCP_VERSION: "v1.8.0"
+        HELM_VERSION: "v4.2.3"
+        HUGO_VERSION: "0.164.0"
+        IMPECCABLE_VERSION: "3.5.0"
+        KUBECTL_VERSION: "v1.36.3"
+        NODE_VERSION: "26.6.0"
+        PAKET_VERSION: "10.3.1"
+        QMD_VERSION: "2.5.3"
+        RIPGREP_VERSION: "15.2.0"
+        SOPS_VERSION: "v3.13.3"
+        TERRAFORM_VERSION: "1.15.8"
+        YQ_VERSION: "v4.53.3"
+    container_name: netclaw-tools-init
+    environment:
+      # Manual override only. Normal upgrades are detected via the build stamp
+      # baked into the image, so bumping a version arg above is enough.
+      TOOLS_REVISION: "${TOOLS_REVISION:-}"
+    volumes:
+      - tools:/out                       # NOT /tools — the image builds at /tools
+    restart: "no"
+
+  # ---- init: netclaw config, git identity, MCP servers, workspace ----------
+  # Uses the netclaw image purely for its CLI. `netclaw mcp add` is a plain
+  # config write and needs no daemon, so this runs before netclaw starts.
+  config-init:
+    image: ghcr.io/netclaw-dev/netclaw:0.25.2
+    container_name: netclaw-config-init
+    entrypoint: ["/bin/bash", "/init/setup.sh"]
+    depends_on:
+      # Needed for /tools/bin/ssh: the netclaw image ships no ssh client, so
+      # cloning an ssh:// or git@host: workspace repo fails with
+      # "error: cannot run ssh: No such file or directory" without it.
+      tools-init:
+        condition: service_completed_successfully
+    environment:
+      # Identity comes from .env — see .env.example.
+      # GIT_USER_NAME/EMAIL are required rather than defaulted: they are written
+      # into commits, and a silently-wrong default would end up in immutable
+      # history. AGENT_NAME only affects the persona, so it defaults.
+      AGENT_NAME: "${AGENT_NAME:-Nixie}"
+      GH_TOKEN: "${GH_TOKEN:?set GH_TOKEN in .env}"
+      GIT_USER_EMAIL: "${GIT_USER_EMAIL:?set GIT_USER_EMAIL in .env}"
+      GIT_USER_KEY: "${GIT_USER_KEY:-}"
+      GIT_USER_NAME: "${GIT_USER_NAME:?set GIT_USER_NAME in .env}"
+      NETCLAW_HOME: /home/netclaw/.netclaw
+      # Whitespace-separated list. Each entry is "<url>", cloned to
+      # $WORKSPACE_ROOT/<repo-name>, or "<url>=<subdir>" to override the
+      # directory. Clone-only and best-effort per repo — see setup.sh.
+      WORKSPACE_REPOS: "${WORKSPACE_REPOS:-}"
+      # Extra flags for each `git clone`. --filter=blob:none makes these partial
+      # clones: full history and commit graph, file contents fetched on demand.
+      #
+      # Single dash, not ":-": ":-" treats an empty value as unset and would
+      # substitute the default back in, so `WORKSPACE_CLONE_ARGS=` in .env could
+      # never mean "plain full clone". With "-" only an *unset* variable gets
+      # the default, and an explicit empty value survives.
+      WORKSPACE_CLONE_ARGS: "${WORKSPACE_CLONE_ARGS---filter=blob:none}"
+      # Defaults to netclaw's own convention for the projects directory. Any
+      # per-client grouping (.../workspaces/<client>) belongs in .env, not here.
+      WORKSPACE_ROOT: "${WORKSPACE_ROOT:-/home/netclaw/.netclaw/workspaces}"
+    volumes:
+      - ./netclaw:/home/netclaw/.netclaw
+      - ./config-init:/init:ro
+      # Mounted rw so setup.sh can repair ownership/modes. netclaw's own
+      # entrypoint only ever repairs $NETCLAW_HOME, never these.
+      - ./cache:/chown/cache
+      - ./nuget:/chown/nuget
+      - ./ssh:/chown/ssh
+      # Read-only, purely to borrow /tools/bin/ssh for ssh-URL workspace clones.
+      - tools:/tools:ro
+    restart: "no"
+
+  # ---- sidecar: Redis ------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: netclaw-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ---- sidecar: headless Chromium over CDP ---------------------------------
+  # Chrome cannot live in /tools: it needs ~30 shared libs netclaw lacks plus
+  # fonts, dbus and a writable sandbox. A sidecar over CDP is the compose-native
+  # answer.
+  chrome:
+    image: ghcr.io/browserless/chromium:v2.55.3
+    container_name: netclaw-chrome
+    restart: unless-stopped
+    shm_size: "1gb"                      # Chrome crashes on the 64MB default
+    environment:
+      CONCURRENT: "3"
+      TIMEOUT: "60000"
+      # Self-issued shared secret — browserless v2 rejects any connection whose
+      # ?token= does not match. Not a vendor credential. It lives in .env, where
+      # setup.sh generates one per deployment, rather than here: a token
+      # hardcoded in a template would be identical in every fork.
+      TOKEN: "${BROWSERLESS_TOKEN:?run ./setup.sh, or set BROWSERLESS_TOKEN in .env}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf \"http://127.0.0.1:3000/pressure?token=$$TOKEN\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # ---- the agent -----------------------------------------------------------
+  netclaw:
+    image: ghcr.io/netclaw-dev/netclaw:0.25.2
+    container_name: netclaw
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW                          # tcpdump / raw sockets
+    depends_on:
+      tools-init:
+        condition: service_completed_successfully
+      config-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      chrome:
+        condition: service_healthy
+    environment:
+      # Same secret as the chrome sidecar's TOKEN above; both read .env, so they
+      # cannot drift apart.
+      BROWSER_WS_ENDPOINT: "ws://chrome:3000?token=${BROWSERLESS_TOKEN}"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: "0"
+      DOTNET_NOLOGO: "1"
+      # Major, not LatestPatch: paket/dotnet-ef/dotnet-outdated target net9.0 and
+      # net8.0 even at their latest versions, and LatestPatch refuses to roll
+      # across a major, failing with "You must install or update .NET". Major
+      # runs them on the 10.0 runtime instead of vendoring two more runtimes.
+      DOTNET_ROLL_FORWARD: Major
+      DOTNET_ROOT: /tools/dotnet
+      GH_TOKEN: "${GH_TOKEN:?set GH_TOKEN in .env}"
+      # github-mcp-server reads this. `netclaw mcp add --env` does not persist,
+      # so the stdio child picks it up by inheriting the daemon's environment.
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GH_TOKEN}"
+      # /home/netclaw is plain container layer — only .netclaw is mounted — so
+      # ~/.gitconfig cannot survive a recreate. Point git at the mount instead.
+      GIT_CONFIG_GLOBAL: /home/netclaw/.netclaw/gitconfig
+      MAGIC: /tools/rootfs/usr/share/misc/magic.mgc
+      PUPPETEER_SKIP_DOWNLOAD: "1"
+      REDIS_URL: redis://redis:6379
+      RTK_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./netclaw:/home/netclaw/.netclaw
+      - ./cache:/home/netclaw/.cache
+      - ./nuget:/home/netclaw/.nuget
+      - ./ssh:/home/netclaw/.ssh:ro      # keys + config + known_hosts
+      - tools:/tools:ro                  # entrypoint supports ro by design
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:5199/api/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

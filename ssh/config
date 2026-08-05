@@ -1,0 +1,18 @@
+# Used by the netclaw agent (uid 1654). Mounted read-only at ~/.ssh.
+Host github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_nixie
+    IdentitiesOnly yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile ~/.ssh/known_hosts
+    # The mount is read-only by design, but OpenSSH defaults UpdateHostKeys=yes
+    # and tries to rewrite known_hosts on every connection, failing with
+    # "hostfile_replace_entries: mkstemp: Read-only file system" on stderr each
+    # time. Host keys are pre-seeded via ssh-keyscan, so learning new ones is
+    # not wanted here anyway.
+    UpdateHostKeys no
+
+Host *
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    UpdateHostKeys no

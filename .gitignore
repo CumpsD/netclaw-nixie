@@ -1,0 +1,54 @@
+# netclaw's runtime state. Mostly ignored — database, logs, sessions, keys,
+# workspaces — but four files are yours to version. The directory itself is not
+# tracked; setup.sh creates it in preflight.
+#
+# This works because setup.sh puts a default POSIX ACL on netclaw/ granting the
+# host user rwX. config-init then chowns the tree to uid 1654 so the daemon can
+# write, and the ACL survives that chown and is inherited by everything the
+# daemon creates. Without it git fails with "unable to unlink old
+# 'netclaw/config/netclaw.json': Permission denied" on the next checkout.
+#
+# config-init seeds these ONCE, on first run, then never touches them again:
+# after that the deployment is yours to manage with the netclaw CLI, and your
+# commits record it. TOOLING.md is excluded because it is a generated
+# capability report, not a setting.
+netclaw/*
+
+!netclaw/config/
+netclaw/config/*
+!netclaw/config/netclaw.json
+!netclaw/config/tool-approvals.json
+
+!netclaw/identity/
+netclaw/identity/*
+!netclaw/identity/AGENTS.md
+!netclaw/identity/SOUL.md
+
+.env
+
+# Python bytecode (config-init/build-props.py)
+__pycache__/
+*.py[cod]
+
+# Cache bind mounts — npm, NuGet, qmd. Nothing in them is worth versioning.
+# They do not need to exist at clone time: setup.sh creates them in preflight.
+/cache/*
+/nuget/*
+
+# /ssh: allowlist, not denylist — anything not named below is ignored, so a
+# private key is excluded by default rather than by remembering to add a rule.
+#
+# Public keys are allowed through, but this template repo intentionally commits
+# none: a .pub here would belong to another deployment, and setup.sh would stop
+# rather than orphan the key GitHub knows about. After forking, run setup.sh to
+# generate your own and commit that — it records which key the deployment signs
+# with, and lets config-init rebuild allowed_signers on another host without
+# regenerating.
+#
+# config and known_hosts are tracked for the same reason: neither is sensitive,
+# and committing known_hosts pins GitHub's host keys so a fresh deploy cannot
+# be seeded with a MITM'd one.
+/ssh/*
+!/ssh/config
+!/ssh/known_hosts
+!/ssh/*.pub
