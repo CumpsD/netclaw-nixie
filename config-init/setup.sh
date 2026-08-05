@@ -441,9 +441,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # 8. Ownership of everything we may have written as root.
+#
+# Every name is expanded with :- because TA, AGENTS and SOUL are only assigned
+# inside the seeding branch. When seeding is skipped — already done, or waiting
+# on `netclaw init` — they are unset, and under `set -u` a bare "$TA" aborts the
+# whole script at list expansion, before the [ -n ] guard inside the loop ever
+# runs. That took config-init down with "TA: unbound variable" after a
+# successful workspace clone.
 # ---------------------------------------------------------------------------
-for f in "$NCJSON" "$TA" "$GITCONFIG" "$AGENTS" "$SOUL"; do
-    [ -n "${f:-}" ] && [ -f "$f" ] && chown "$UID_GID" "$f"
+for f in "${NCJSON:-}" "${TA:-}" "${GITCONFIG:-}" "${AGENTS:-}" "${SOUL:-}"; do
+    [ -n "$f" ] && [ -f "$f" ] && chown "$UID_GID" "$f"
 done
 
 # ---------------------------------------------------------------------------
