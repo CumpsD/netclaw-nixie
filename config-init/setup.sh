@@ -292,6 +292,22 @@ if [ -f /init/agents-block.md ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 4c. Search backend.
+#
+# Points netclaw's built-in web search at the SearXNG sidecar, whose JSON API
+# is what this backend consumes. Only seeded while .Search is absent, so an
+# operator who switched backends or moved the endpoint keeps that choice on a
+# re-seed. The endpoint mirrors SEARXNG_URL in nixie.yml.
+# ---------------------------------------------------------------------------
+if jq -e '.Search' "$NCJSON" >/dev/null 2>&1; then
+    log "search: .Search already configured — keeping it"
+else
+    log "search: pointing netclaw's web search at the searxng sidecar"
+    jq '.Search = {Backend: "searxng", SearXngEndpoint: "http://searxng:8080"}' "$NCJSON" > /tmp/nc.json \
+        && cat /tmp/nc.json > "$NCJSON" && rm -f /tmp/nc.json
+fi
+
+# ---------------------------------------------------------------------------
 # 7. shell_execute approval seed.
 #
 # A starting set, not a desired state. The daemon appends to this file whenever

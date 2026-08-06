@@ -119,20 +119,12 @@ is the single place to bump one.
 
 ### MCP servers
 
-`github`, `qmd`, `searxng` and `atlassian` are registered automatically.
-Atlassian needs a one-time interactive OAuth step:
+`github`, `qmd`, `searxng` and `atlassian` are registered automatically, and
+netclaw's built-in web search is pointed at the SearXNG sidecar. Atlassian
+needs a one-time interactive OAuth step:
 
 ```sh
 docker compose exec -it netclaw netclaw mcp auth atlassian
-```
-
-Registration is part of the one-time seeding, so a fork seeded *before* the
-SearXNG sidecar existed never gets its MCP server automatically. Register it
-once by hand (do **not** delete `.nixie-seeded` for this — re-seeding would
-also resurrect removed servers and revoked approvals):
-
-```sh
-docker compose exec netclaw netclaw mcp add --transport stdio searxng -- mcp-searxng
 ```
 
 ---
@@ -156,7 +148,7 @@ Two kinds of tracked file, with different lifecycles.
 
 | File | Seeded from |
 |---|---|
-| `netclaw/config/netclaw.json` | MCP servers and `AGENT_NAME` |
+| `netclaw/config/netclaw.json` | MCP servers, `AGENT_NAME` and the SearXNG search backend |
 | `netclaw/config/tool-approvals.json` | `config-init/approvals-seed.json` |
 | `netclaw/identity/AGENTS.md` | `config-init/agents-block.md` |
 | `netclaw/identity/SOUL.md` | netclaw's default, renamed to `AGENT_NAME` |
