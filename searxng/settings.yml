@@ -9,7 +9,18 @@
 # No secret_key here on purpose — SEARXNG_SECRET (env, from .env) overrides
 # it, so no fork commits a shared secret. The limiter keeps its default (off);
 # that is also why there is no valkey sidecar — enabling one needs both.
-use_default_settings: true
+# `remove`, not `disabled: true`: a disabled engine still loads (and still
+# errors at startup), it is merely unselected in the UI. remove drops it
+# before loading. ahmia and torch are onion engines that cannot load without
+# a Tor proxy and error on every start. wikidata's init query gets 403'd by
+# query.wikidata.org from this deployment's IP; removing it also drops
+# wikidata infobox data — restore if that starts mattering.
+use_default_settings:
+  engines:
+    remove:
+      - ahmia
+      - torch
+      - wikidata
 search:
   formats:
     - html
