@@ -304,6 +304,14 @@ services:
       # Same tree the daemon uses: reads netclaw.json and secrets.json,
       # writes config/tool-approvals.json.
       NETCLAW_HOME: /home/netclaw/.netclaw
+      # The publish output ships no appsettings.json, so every category logs
+      # at Information and two pollers dominate stdout: the UI's own daemon
+      # status poll (Refit HttpClient start/send/receive lines) and the
+      # healthcheck curl above (AspNetCore request logs for / every 15s).
+      # Scoped to those two categories so warnings, errors and the
+      # Microsoft.Hosting.Lifetime startup lines still come through.
+      Logging__LogLevel__System.Net.Http.HttpClient: Warning
+      Logging__LogLevel__Microsoft.AspNetCore: Warning
     volumes:
       # rw on purpose — the Approvals page writes config/tool-approvals.json.
       - ./netclaw:/home/netclaw/.netclaw
