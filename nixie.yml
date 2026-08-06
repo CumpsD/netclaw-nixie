@@ -192,6 +192,15 @@ services:
     image: ghcr.io/netclaw-dev/netclaw:0.25.4
     container_name: netclaw
     restart: unless-stopped
+    ports:
+      # Management UI. netclaw-ui shares this container's network namespace
+      # (network_mode below), so its port is published here — the first and
+      # only published port in the stack, and that is deliberate. Host-loopback
+      # by default: the UI has no login and holds Operator power over the
+      # daemon. Change the port half freely; widen the address half only with
+      # an authenticating proxy in front. The daemon's own 5199 stays
+      # unpublished either way.
+      - "${NETCLAW_UI_BIND:-127.0.0.1:5198}:5198"
     cap_add:
       - NET_RAW                          # tcpdump / raw sockets
     depends_on:
@@ -244,4 +253,66 @@ services:
       interval: 15s
       timeout: 5s
       start_period: 30s
+      retries: 3
+
+  # ---- sidecar: management UI (unofficial) ---------------------------------
+  # codymullins/netclaw-ui, a Blazor Server management UI for the daemon,
+  # built from a pinned commit by ui/Dockerfile (upstream ships no image).
+  #
+  # It shares the netclaw container's network namespace so its calls reach the
+  # loopback-bound control plane at 127.0.0.1:5199 as a genuine loopback
+  # caller, which the daemon auto-authenticates as Operator — no device token,
+  # no daemon config change. That netns membership is a deliberate auth grant,
+  # which is exactly why the other sidecars do NOT get it: chrome and searxng
+  # handle untrusted web content and must never see the daemon's loopback.
+  # Flip side of sharing: the UI's host port is published on the netclaw
+  # service (see ports: there), and recreating netclaw recreates this
+  # container with it.
+  #
+  # The UI has NO authentication of its own and wields Operator power, so the
+  # default publish is host-loopback only. Four of its calls target endpoints
+  # that exist only in the author's netclaw fork, not stock 0.25.4 — the Model
+  # page, the Discord config tab and Stop/Restart degrade to an
+  # unreachable-style state instead of working. See README.
+  netclaw-ui:
+    build:
+      context: ./ui
+      args:
+        # Full commit SHA of codymullins/netclaw-ui. The netclaw submodule
+        # revision is pinned by this commit itself (gitlink), not by us.
+        UI_REVISION: "edc8cddc219800c6fbc709454d0f47df200a2c2f"
+        # Build SDK matches the UI repo's global.json exactly (it builds with
+        # TreatWarningsAsErrors, so a newer SDK's new analyzer warnings would
+        # break the build); runtime is the aspnet patch current as of
+        # 2026-08-06.
+        DOTNET_SDK_TAG: "10.0.203"
+        DOTNET_ASPNET_TAG: "10.0.10"
+    container_name: netclaw-ui
+    restart: unless-stopped
+    network_mode: "service:netclaw"
+    depends_on:
+      netclaw:
+        condition: service_healthy       # also guarantees ./netclaw is chowned to 1654 by then
+    environment:
+      # 0.0.0.0, not loopback: published ports NAT to the container interface,
+      # so a loopback bind would be unreachable from the host. Actual exposure
+      # is gated by the host-side bind in netclaw's ports:.
+      ASPNETCORE_URLS: "http://0.0.0.0:5198"
+      # Top of the UI's endpoint resolution chain. Loopback ⇒ the daemon
+      # grants Operator without a token (see the netns note above).
+      NETCLAW_DAEMON_ENDPOINT: "http://127.0.0.1:5199"
+      # Same tree the daemon uses: reads netclaw.json and secrets.json,
+      # writes config/tool-approvals.json.
+      NETCLAW_HOME: /home/netclaw/.netclaw
+    volumes:
+      # rw on purpose — the Approvals page writes config/tool-approvals.json.
+      - ./netclaw:/home/netclaw/.netclaw
+    healthcheck:
+      # Executes inside this container (shared netns, own filesystem). The UI
+      # has no dedicated health endpoint; the Blazor root answering is the
+      # signal. curl is installed by ui/Dockerfile for exactly this.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:5198/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
       retries: 3

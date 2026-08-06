@@ -49,12 +49,16 @@ docker compose exec -T  netclaw netclaw doctor      # diagnostics
 docker compose logs -f netclaw                      # follow the daemon
 ```
 
+The management UI is at <http://127.0.0.1:5198> — see
+[Management UI (unofficial)](#management-ui-unofficial).
+
 ---
 
 ## Requirements
 
 - Docker with Compose v2
-- ~5.5 GB free disk (3 GB tools volume, ~1 GB Chromium image, ~0.3 GB SearXNG)
+- ~7 GB free disk (3 GB tools volume, ~1 GB Chromium image, ~0.3 GB SearXNG,
+  ~1.5 GB management-UI build + runtime images)
 - A GitHub personal access token
 
 Nothing else, `setup.sh` runs `ssh-keygen` and `openssl` inside containers, so
@@ -67,7 +71,7 @@ they are not host prerequisites.
 1. **Preflight**, checks Docker, validates `.env`, creates the bind-mount
    directories, generates a `BROWSERLESS_TOKEN`, a `SEARXNG_SECRET` and an
    ed25519 signing key if they do not exist yet.
-2. **Build**, builds the tools image.
+2. **Build**, builds the tools and management-UI images.
 3. **Up**, starts the stack.
 4. **Health**, waits for netclaw to report healthy.
 5. **`netclaw init`**, runs netclaw's first-run wizard.
@@ -126,6 +130,53 @@ needs a one-time interactive OAuth step:
 ```sh
 docker compose exec -it netclaw netclaw mcp auth atlassian
 ```
+
+---
+
+## Management UI (unofficial)
+
+[codymullins/netclaw-ui](https://github.com/codymullins/netclaw-ui) is an
+unofficial Blazor Server management UI for the daemon. Upstream ships no image,
+so `ui/Dockerfile` builds it from a commit pinned in `nixie.yml` — the same
+single place every other version lives. Once the stack is up it is at
+**<http://127.0.0.1:5198>**.
+
+**How it connects.** The `netclaw-ui` container joins the netclaw container's
+network namespace (`network_mode: "service:netclaw"`), so its API calls arrive
+on the daemon's loopback-bound control plane at `127.0.0.1:5199` and are
+auto-authenticated as **Operator** — no device token, no change to the daemon's
+config or image. That netns membership is a deliberate auth grant, and it is
+why *only* the UI gets it: sharing the namespace with redis/chrome/searxng
+would both deadlock compose (netclaw depends on them starting first) and hand
+loopback Operator access to sidecars that render and fetch untrusted web
+content. They stay on the bridge.
+
+**What works, what degrades.** Against the stock `0.25.4` daemon: Status,
+Sessions, Stats, Reminders, MCP connectors (including OAuth start/status), the
+Approvals page (file-based, read-write) and the Configuration view all work.
+The Model page, the Discord configuration tab and the Stop/Restart buttons call
+endpoints that exist only in the author's netclaw fork (`GET /api/models`,
+`GET/PUT /api/model/selection`, `GET/PUT /api/config/discord`,
+`POST /api/lifecycle/stop`) — they show an unreachable-style state rather than
+working. Launch-daemon controls are meaningless in-container and fail
+gracefully; the container supervisor restarts `netclawd` anyway.
+
+**Security posture, bluntly.** The UI has **no authentication** and wields
+Operator-level control of the agent; its process can read
+`netclaw/config/secrets.json` and writes `netclaw/config/tool-approvals.json`.
+It is therefore published on host loopback only. Change the port via
+`NETCLAW_UI_BIND` in `.env` freely; widen the *address* half only with an
+authenticating reverse proxy in front.
+
+**Caveats.**
+
+- Recreating `netclaw` recreates `netclaw-ui` with it (shared namespace);
+  `docker compose restart netclaw` shows a brief unreachable blip in the UI.
+- The daemon and the UI both edit `tool-approvals.json` with last-writer-wins
+  semantics — avoid editing approvals from the UI and the CLI at the same
+  moment.
+- Don't want the UI at all? Delete the `netclaw-ui` service block and the
+  `ports:` lines on the `netclaw` service.
 
 ---
 
@@ -200,6 +251,7 @@ nixie.yml                the compose stack
 .env.example             every setting, documented
 tools-init/              builds the /tools payload
 config-init/             netclaw config, MCP, git identity, workspaces
+ui/                      builds the unofficial management UI (netclaw-ui)
 searxng/                 SearXNG config (committed, mounted read-only)
 ssh/                     ssh client config; your key lands here
 netclaw/                 your bot's config (tracked) + runtime state (ignored)

@@ -194,7 +194,7 @@ else
 fi
 
 # ---- 2. build --------------------------------------------------------------
-step "Building the tools image"
+step "Building the images"
 if docker image inspect nixie-tools-init:latest >/dev/null 2>&1; then
     info "image exists; rebuilding only if the recipe changed"
 else
@@ -202,6 +202,8 @@ else
 fi
 docker compose build tools-init
 ok "tools image ready"
+docker compose build netclaw-ui
+ok "management UI image ready"
 
 # ---- 3. up -----------------------------------------------------------------
 step "Starting the stack"
@@ -219,6 +221,16 @@ while :; do
         missing) die "the netclaw container is not running — check: docker compose logs" ;;
     esac
     [ $SECONDS -lt $deadline ] || die "netclaw did not become healthy within 5 minutes. Check: docker compose logs netclaw"
+    sleep 3
+done
+
+# The management UI is a convenience, not a prerequisite — the stack is fully
+# usable without it, so an unhealthy UI warns instead of aborting.
+deadline=$((SECONDS + 90))
+while :; do
+    state="$(docker inspect -f '{{.State.Health.Status}}' netclaw-ui 2>/dev/null || echo missing)"
+    [ "$state" = healthy ] && { ok "management UI is healthy"; break; }
+    [ $SECONDS -lt $deadline ] || { warn "management UI is not healthy yet — check: docker compose logs netclaw-ui"; break; }
     sleep 3
 done
 
@@ -313,6 +325,7 @@ printf '\n%s%s%s\n' "$B" "── Next ──────────────
 cat <<EOF
     Chat with the agent      docker compose exec -it netclaw netclaw chat
     One-shot prompt          docker compose exec -T  netclaw netclaw chat -p "hello"
+    Management UI            http://127.0.0.1:5198  (unofficial; no login — keep it loopback)
     Full diagnostics         docker compose exec -T  netclaw netclaw doctor
     Authorise Atlassian      docker compose exec -it netclaw netclaw mcp auth atlassian
     Follow the logs          docker compose logs -f netclaw
