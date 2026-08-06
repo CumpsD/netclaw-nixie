@@ -61,7 +61,7 @@ services:
   # Uses the netclaw image purely for its CLI. `netclaw mcp add` is a plain
   # config write and needs no daemon, so this runs before netclaw starts.
   config-init:
-    image: ghcr.io/netclaw-dev/netclaw:0.25.3
+    image: ghcr.io/netclaw-dev/netclaw:0.25.4
     container_name: netclaw-config-init
     entrypoint: ["/bin/bash", "/init/setup.sh"]
     depends_on:
@@ -189,7 +189,7 @@ services:
 
   # ---- the agent -----------------------------------------------------------
   netclaw:
-    image: ghcr.io/netclaw-dev/netclaw:0.25.3
+    image: ghcr.io/netclaw-dev/netclaw:0.25.4
     container_name: netclaw
     restart: unless-stopped
     cap_add:
