@@ -117,7 +117,8 @@ fi
 
 # Bind-mount sources. Docker would create them on first `up`, but as root:root;
 # making them here keeps them host-owned from the start.
-mkdir -p cache nuget netclaw ssh
+mounts=(cache nuget netclaw ssh)
+mkdir -p "${mounts[@]}"
 ok "bind-mount directories present"
 
 # Default ACL granting the host user rwX on everything under these trees.
@@ -129,9 +130,23 @@ ok "bind-mount directories present"
 # Applied here, before the first `up`, while the directories are still ours: a
 # default ACL survives the later chown and is inherited by every file the
 # daemon creates afterwards.
+#
+# On a re-run that chown has already happened, so setfacl exits non-zero with
+# "Operation not permitted" on the daemon-owned files — even though the ACLs
+# from the first run are still in place and inherited. acl_applied tells that
+# case apart from a filesystem that genuinely cannot take an ACL: the default
+# entry on the top-level directories survives everything the daemon does.
+acl_applied() {
+    local d uid; uid="$(id -u)"
+    for d in "${mounts[@]}"; do
+        getfacl -pn --omit-header "$d" 2>/dev/null | grep -q "^default:user:$uid:rwx" || return 1
+    done
+}
 if command -v setfacl >/dev/null 2>&1 \
-   && setfacl -R -m "u:$(id -u):rwX" -d -m "u:$(id -u):rwX" cache nuget netclaw ssh 2>/dev/null; then
+   && setfacl -R -m "u:$(id -u):rwX" -d -m "u:$(id -u):rwX" "${mounts[@]}" 2>/dev/null; then
     ok "host access to container-owned directories granted (ACL)"
+elif acl_applied; then
+    ok "host access to container-owned directories granted (ACL from an earlier run)"
 else
     warn "could not set an ACL on the bind mounts"
     info "The stack still works, but once config-init chowns netclaw/ to uid 1654"
