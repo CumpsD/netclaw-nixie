@@ -58,8 +58,8 @@ done
 
 # ssh permissions, split by sensitivity.
 #
-# Only the private keys get locked to the runtime user. The directory stays
-# 0755 and the public material 0644 on purpose: ssh/config, ssh/known_hosts and
+# Private keys are locked to the runtime user. The directory stays 0755 and
+# the public material 0644 on purpose: ssh/config, ssh/known_hosts and
 # ssh/*.pub are git-tracked, and a 0700 directory owned by uid 1654 makes them
 # unreadable to the human on the host — `git status` then fails with
 # "Permission denied" and reports the tracked files as missing.
@@ -74,7 +74,21 @@ if [ -d /chown/ssh ]; then
     find /chown/ssh -type f \
         ! -name '*.pub' ! -name 'known_hosts' ! -name 'config' ! -name '.gitkeep' \
         -exec chown "$UID_GID" {} + -exec chmod 600 {} + 2>/dev/null || true
-    log "ssh: private keys locked to $UID_GID, public material left readable"
+    # config needs 1654 as OWNER, not just readability: ssh refuses to start
+    # with "Bad owner or permissions on ~/.ssh/config" unless the file is
+    # owned by the uid running ssh, or by root. The bind mount keeps the host
+    # owner and docker has no idmapped bind mounts, so it is repaired here.
+    # Mode stays 644 — the host keeps read access for git; editing it on the
+    # host needs sudo from now on.
+    #
+    # The chmod 644 above is also load-bearing for setup.sh's host ACL: an
+    # ACL mask shows up as the group bits of st_mode, and ssh rejects
+    # group-write with the same "Bad owner" error. chmod 644 caps the mask
+    # to read, so re-running setfacl only breaks ssh until the next start.
+    if [ -f /chown/ssh/config ]; then
+        chown "$UID_GID" /chown/ssh/config
+    fi
+    log "ssh: private keys and config owned by $UID_GID, public material left readable"
 fi
 
 # ---------------------------------------------------------------------------
