@@ -136,7 +136,9 @@ services:
       # browserless logs through the npm `debug` package and traces every
       # request by default — the 15s /pressure healthcheck alone is ~5 log
       # lines per probe. Keep info/warn/error, drop the trace/debug firehose.
-      DEBUG: "browserless.io:*,-browserless.io:*:trace,-browserless.io:*:debug"
+      # index:info is also dropped: it only carries the 5-minute metrics
+      # heartbeat ("Current period usage", "Saving metrics to ...").
+      DEBUG: "browserless.io:*,-browserless.io:*:trace,-browserless.io:*:debug,-browserless.io:index:info"
       TIMEOUT: "60000"
       # Self-issued shared secret — browserless v2 rejects any connection whose
       # ?token= does not match. Not a vendor credential. It lives in .env, where
