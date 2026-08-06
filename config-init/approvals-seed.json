@@ -59,6 +59,7 @@
     "find",
     "gh auth",
     "gh auth status",
+    "gh pr comment",
     "gh pr create",
     "gh pr diff",
     "gh pr list",
