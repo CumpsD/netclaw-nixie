@@ -25,3 +25,10 @@ search:
   formats:
     - html
     - json
+  # Instance-wide, but brave is the engine that trips it: it 429s scrapers
+  # within minutes, and the default 180s suspend means a retry (and a full
+  # traceback in the logs) every ~3 minutes. One hour keeps the engine while
+  # cutting that to one burst per hour. Partial override is safe — the
+  # settings loader deep-merges, so the other suspended_times keep defaults.
+  suspended_times:
+    SearxEngineTooManyRequests: 3600
