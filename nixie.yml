@@ -23,7 +23,7 @@ services:
     build:
       context: ./tools-init
       args:
-        # All pinned to the latest release as of 2026-08-05, verified fetchable.
+        # All pinned to the latest release as of 2026-08-06, verified fetchable.
         # DOTNET_EXTRA_* are opt-in *lists*, not versions — empty means "install
         # none", so they stay empty unless a client repo needs a second SDK.
         BRUNO_VERSION: "4.0.0"
@@ -41,7 +41,7 @@ services:
         IMPECCABLE_VERSION: "3.5.0"
         KUBECTL_VERSION: "v1.36.3"
         MCP_SEARXNG_VERSION: "1.14.0"
-        NODE_VERSION: "26.6.0"
+        NODE_VERSION: "26.7.0"
         PAKET_VERSION: "10.3.1"
         QMD_VERSION: "2.5.3"
         RIPGREP_VERSION: "15.2.0"
@@ -150,9 +150,12 @@ services:
   # Self-hosted web search: no API key, no per-query SaaS bill, and queries
   # stay on the compose network (no ports published). Config is the committed
   # ./searxng/settings.yml. Pinned to a dated tag — SearXNG has no semver
-  # releases, so bumps are deliberate edits here.
+  # releases, so bumps are deliberate edits here. Do not trust the tag names
+  # to sort by recency: the date is the source date, not the build order, and
+  # an older-named tag can carry a newer build. When bumping, pick the tag
+  # whose digest matches upstream's `latest`.
   searxng:
-    image: docker.io/searxng/searxng:2026.8.5-1689cb1b5
+    image: docker.io/searxng/searxng:2026.8.4-c63835bd2
     container_name: netclaw-searxng
     restart: unless-stopped
     environment:
