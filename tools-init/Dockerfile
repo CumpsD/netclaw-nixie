@@ -31,6 +31,7 @@ ARG HELM_VERSION=v4.2.3
 ARG HUGO_VERSION=0.164.0
 ARG IMPECCABLE_VERSION=3.5.0
 ARG KUBECTL_VERSION=v1.36.3
+ARG MCP_SEARXNG_VERSION=1.14.0
 ARG NODE_VERSION=26.6.0
 ARG PAKET_VERSION=10.3.1
 ARG QMD_VERSION=2.5.3
@@ -138,6 +139,7 @@ ARG HELM_VERSION
 ARG HUGO_VERSION
 ARG IMPECCABLE_VERSION
 ARG KUBECTL_VERSION
+ARG MCP_SEARXNG_VERSION
 ARG NODE_VERSION
 ARG PAKET_VERSION
 ARG QMD_VERSION
@@ -238,10 +240,15 @@ RUN set -eux; \
     /tools/node/bin/npm install -g --prefix /tools/node \
         "@tobilu/qmd@${QMD_VERSION}" \
         "impeccable@${IMPECCABLE_VERSION}" \
-        "@usebruno/cli@${BRUNO_VERSION}"; \
-    for b in node npm npx qmd impeccable bru; do \
+        "@usebruno/cli@${BRUNO_VERSION}" \
+        "mcp-searxng@${MCP_SEARXNG_VERSION}"; \
+    for b in node npm npx qmd impeccable bru mcp-searxng; do \
         [ -e "/tools/node/bin/$b" ] && ln -sf "../node/bin/$b" "/tools/bin/$b"; \
     done; \
+    # The loop above skips a missing bin silently; fail the build instead if a
+    # package renamed its executable. Not a smoke run — mcp-searxng is a stdio
+    # server and would hang the build.
+    readlink -e /tools/bin/mcp-searxng >/dev/null; \
     /tools/node/bin/node --version
 
 # ---------------------------------------------------------------------------
@@ -312,7 +319,8 @@ RUN { printf '%s\n' \
         "${DOTNET_EXTRA_RUNTIMES} ${DOTNET_EXTRA_SDKS}" \
         "${DOTNET_OUTDATED_TOOL_VERSION} ${DOTNET_SCRIPT_VERSION} ${DOTNET_VERSION}" \
         "${GH_VERSION} ${GITHUB_MCP_VERSION} ${HELM_VERSION} ${HUGO_VERSION}" \
-        "${IMPECCABLE_VERSION} ${KUBECTL_VERSION} ${NODE_VERSION} ${PAKET_VERSION}" \
+        "${IMPECCABLE_VERSION} ${KUBECTL_VERSION} ${MCP_SEARXNG_VERSION}" \
+        "${NODE_VERSION} ${PAKET_VERSION}" \
         "${QMD_VERSION} ${RIPGREP_VERSION} ${SOPS_VERSION} ${TERRAFORM_VERSION} ${YQ_VERSION}"; \
       cat /tools/.recipe/Dockerfile /tools/.recipe/provision-tier2.sh /tools/.recipe/entrypoint.sh; \
     } | sha256sum | cut -c1-16 > /tools/.stamp \

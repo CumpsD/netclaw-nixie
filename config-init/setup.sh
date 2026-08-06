@@ -226,6 +226,7 @@ add_mcp() {
 
 add_mcp github    --transport stdio github -- github-mcp-server stdio
 add_mcp qmd       --transport stdio qmd -- qmd mcp
+add_mcp searxng   --transport stdio searxng -- mcp-searxng
 add_mcp atlassian --transport http atlassian https://mcp.atlassian.com/v1/mcp
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@
 volumes:
   tools:
   redis-data:
+  searxng-data:
 
 services:
   # ---- init: build + provision the /tools volume, then exit ----------------
@@ -39,6 +40,7 @@ services:
         HUGO_VERSION: "0.164.0"
         IMPECCABLE_VERSION: "3.5.0"
         KUBECTL_VERSION: "v1.36.3"
+        MCP_SEARXNG_VERSION: "1.14.0"
         NODE_VERSION: "26.6.0"
         PAKET_VERSION: "10.3.1"
         QMD_VERSION: "2.5.3"
@@ -144,6 +146,38 @@ services:
       start_period: 20s
       retries: 3
 
+  # ---- sidecar: SearXNG metasearch -----------------------------------------
+  # Self-hosted web search: no API key, no per-query SaaS bill, and queries
+  # stay on the compose network (no ports published). Config is the committed
+  # ./searxng/settings.yml. Pinned to a dated tag — SearXNG has no semver
+  # releases, so bumps are deliberate edits here.
+  searxng:
+    image: docker.io/searxng/searxng:2026.8.5-1689cb1b5
+    container_name: netclaw-searxng
+    restart: unless-stopped
+    environment:
+      # The entrypoint chown -Rs /etc/searxng when it is not owned by
+      # searxng:searxng — on a read-only mount that fails noisily on every
+      # start. false turns it into a single clean warning.
+      FORCE_OWNERSHIP: "false"
+      SEARXNG_BASE_URL: "http://searxng:8080/"
+      # Cookie/HMAC signing secret. SearXNG refuses to start while the key is
+      # the template's "ultrasecretkey"; this env var overrides settings.yml,
+      # so the committed config stays secret-free. Self-issued, not a vendor
+      # credential — setup.sh generates one per deployment.
+      SEARXNG_SECRET: "${SEARXNG_SECRET:?run ./setup.sh, or set SEARXNG_SECRET in .env}"
+    volumes:
+      - ./searxng:/etc/searxng:ro          # settings.yml only; never written
+      - searxng-data:/var/cache/searxng    # engine/data caches
+    healthcheck:
+      # wget, not curl: the image ships only wget. /healthz answers without
+      # touching any upstream engine, so egress-blocked hosts still pass.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
   # ---- the agent -----------------------------------------------------------
   netclaw:
     image: ghcr.io/netclaw-dev/netclaw:0.25.2
@@ -159,6 +193,8 @@ services:
       redis:
         condition: service_healthy
       chrome:
+        condition: service_healthy
+      searxng:
         condition: service_healthy
     environment:
       # Same secret as the chrome sidecar's TOKEN above; both read .env, so they
@@ -184,6 +220,10 @@ services:
       PUPPETEER_SKIP_DOWNLOAD: "1"
       REDIS_URL: redis://redis:6379
       RTK_TELEMETRY_DISABLED: "1"
+      # mcp-searxng reads this. Same rule as GITHUB_PERSONAL_ACCESS_TOKEN
+      # above: `netclaw mcp add --env` does not persist, so the stdio child
+      # inherits it from the daemon's environment.
+      SEARXNG_URL: "http://searxng:8080"
     volumes:
       - ./netclaw:/home/netclaw/.netclaw
       - ./cache:/home/netclaw/.cache

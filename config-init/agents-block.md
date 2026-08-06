@@ -35,6 +35,10 @@ rtk proxy <cmd>       # raw passthrough, no filtering
 - There is **no local browser binary**. A headless Chromium is reachable over
   CDP at `$BROWSER_WS_ENDPOINT`; drive it with `puppeteer-core` via `connect()`,
   not `launch()`.
+- Web search is a local SearXNG instance at `http://searxng:8080`
+  (`$SEARXNG_URL`). Prefer the `searxng` MCP tools (search + URL reader); the
+  raw JSON API also works: `curl "http://searxng:8080/search?q=…&format=json"`.
+  There is no external search API key in this deployment.
 - `~/.cache` and `~/.nuget` persist across restarts; the rest of `$HOME` outside
   `~/.netclaw` does not.
 - Git commits are authored from `~/.netclaw/gitconfig` and signed with an ssh

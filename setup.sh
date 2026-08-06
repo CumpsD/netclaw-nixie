@@ -94,6 +94,27 @@ else
     ok "BROWSERLESS_TOKEN present"
 fi
 
+# Cookie/HMAC signing secret for the SearXNG sidecar. Same deal as the token
+# above: generated per deployment so no two forks share one. SearXNG exits at
+# startup while its secret is still the template default, so this cannot be
+# left empty.
+if [ -z "$(envval SEARXNG_SECRET)" ]; then
+    if command -v openssl >/dev/null 2>&1; then
+        tok="$(openssl rand -hex 24)"
+    else
+        tok="$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
+    fi
+    # Replace an empty assignment if present, otherwise append.
+    if grep -q '^SEARXNG_SECRET=' .env; then
+        sed -i "s|^SEARXNG_SECRET=.*|SEARXNG_SECRET=$tok|" .env
+    else
+        printf '\nSEARXNG_SECRET=%s\n' "$tok" >> .env
+    fi
+    ok "generated SEARXNG_SECRET into .env"
+else
+    ok "SEARXNG_SECRET present"
+fi
+
 # Bind-mount sources. Docker would create them on first `up`, but as root:root;
 # making them here keeps them host-owned from the start.
 mkdir -p cache nuget netclaw ssh

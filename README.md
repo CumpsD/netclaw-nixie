@@ -54,7 +54,7 @@ docker compose logs -f netclaw                      # follow the daemon
 ## Requirements
 
 - Docker with Compose v2
-- ~5 GB free disk (3 GB tools volume, ~1 GB Chromium image)
+- ~5.5 GB free disk (3 GB tools volume, ~1 GB Chromium image, ~0.3 GB SearXNG)
 - A GitHub personal access token
 
 Nothing else, `setup.sh` runs `ssh-keygen` and `openssl` inside containers, so
@@ -65,8 +65,8 @@ they are not host prerequisites.
 ## What `setup.sh` does
 
 1. **Preflight**, checks Docker, validates `.env`, creates the bind-mount
-   directories, generates a `BROWSERLESS_TOKEN` and an ed25519 signing key if
-   they do not exist yet.
+   directories, generates a `BROWSERLESS_TOKEN`, a `SEARXNG_SECRET` and an
+   ed25519 signing key if they do not exist yet.
 2. **Build**, builds the tools image.
 3. **Up**, starts the stack.
 4. **Health**, waits for netclaw to report healthy.
@@ -112,14 +112,27 @@ is the single place to bump one.
 - **Redis** at `redis:6379` (`$REDIS_URL`)
 - **Headless Chromium** over CDP at `$BROWSER_WS_ENDPOINT`. There is no local
   browser binary; drive it with `puppeteer-core` via `connect()`, not `launch()`.
+- **SearXNG** metasearch at `http://searxng:8080` (`$SEARXNG_URL`), JSON API
+  enabled. Reached through the `searxng` MCP server, or plain
+  `curl "http://searxng:8080/search?q=…&format=json"`. No search API key, and
+  queries never leave the compose network.
 
 ### MCP servers
 
-`github`, `qmd` and `atlassian` are registered automatically. Atlassian needs a
-one-time interactive OAuth step:
+`github`, `qmd`, `searxng` and `atlassian` are registered automatically.
+Atlassian needs a one-time interactive OAuth step:
 
 ```sh
 docker compose exec -it netclaw netclaw mcp auth atlassian
+```
+
+Registration is part of the one-time seeding, so a fork seeded *before* the
+SearXNG sidecar existed never gets its MCP server automatically. Register it
+once by hand (do **not** delete `.nixie-seeded` for this — re-seeding would
+also resurrect removed servers and revoked approvals):
+
+```sh
+docker compose exec netclaw netclaw mcp add --transport stdio searxng -- mcp-searxng
 ```
 
 ---
@@ -135,6 +148,7 @@ Two kinds of tracked file, with different lifecycles.
 |---|---|
 | `.env` | Secrets and identity. **Gitignored**, never committed |
 | `nixie.yml` | Tool versions, image pins, sidecars, env wiring |
+| `searxng/settings.yml` | SearXNG result formats and engines |
 | `ssh/config`, `ssh/known_hosts` | SSH client config and pinned host keys |
 | `ssh/*.pub` | Your deployment's public signing key, once generated |
 
@@ -194,6 +208,7 @@ nixie.yml                the compose stack
 .env.example             every setting, documented
 tools-init/              builds the /tools payload
 config-init/             netclaw config, MCP, git identity, workspaces
+searxng/                 SearXNG config (committed, mounted read-only)
 ssh/                     ssh client config; your key lands here
 netclaw/                 your bot's config (tracked) + runtime state (ignored)
 cache/, nuget/           package caches (generated, gitignored)

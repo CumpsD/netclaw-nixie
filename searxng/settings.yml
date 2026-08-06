@@ -1,0 +1,16 @@
+# SearXNG configuration, merged over the image's bundled defaults.
+# Mounted read-only at /etc/searxng — the entrypoint only copies its template
+# when settings.yml is MISSING, so this file is used untouched.
+#
+# json in search.formats is the point of this file: the agent talks to the
+# instance through mcp-searxng and /search?format=json, which answer 403
+# unless json is enabled. html stays for debugging.
+#
+# No secret_key here on purpose — SEARXNG_SECRET (env, from .env) overrides
+# it, so no fork commits a shared secret. The limiter keeps its default (off);
+# that is also why there is no valkey sidecar — enabling one needs both.
+use_default_settings: true
+search:
+  formats:
+    - html
+    - json
