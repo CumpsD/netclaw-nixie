@@ -133,6 +133,10 @@ services:
     shm_size: "1gb"                      # Chrome crashes on the 64MB default
     environment:
       CONCURRENT: "3"
+      # browserless logs through the npm `debug` package and traces every
+      # request by default — the 15s /pressure healthcheck alone is ~5 log
+      # lines per probe. Keep info/warn/error, drop the trace/debug firehose.
+      DEBUG: "browserless.io:*,-browserless.io:*:trace,-browserless.io:*:debug"
       TIMEOUT: "60000"
       # Self-issued shared secret — browserless v2 rejects any connection whose
       # ?token= does not match. Not a vendor credential. It lives in .env, where
