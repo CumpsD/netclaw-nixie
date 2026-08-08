@@ -99,6 +99,7 @@
     "git config",
     "git diff",
     "git fetch",
+    "git fetch origin",
     "git fetch origin dev",
     "git fetch upstream",
     "git fetch upstream main",
